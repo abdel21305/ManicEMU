@@ -30,7 +30,7 @@ jobs:
         run: |
           xcodebuild \
             -project ManicEmu/ManicEmu.xcodeproj \
-            -scheme ManicEmu \
+            -scheme ManicEmuSideload \
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
