@@ -1,3 +1,4 @@
+
 name: Build ManicEMU IPA
 
 on:
@@ -13,6 +14,7 @@ permissions:
 jobs:
   build:
     runs-on: macos-26
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,15 +26,13 @@ jobs:
         run: xcodebuild -version
 
       - name: List project schemes
-        run: xcodebuild -list -project ManicEmu/ManicEmu.xcodeproj
-
-      - name: Show Xcode plugin diagnostics
         run: |
-          xcodebuild -version
-          xcodebuild -list -project ManicEmu/ManicEmu.xcodeproj
-          env | sort | grep -E 'XCODE|SWIFT|SDK' || true
+          xcodebuild -list \
+            -project ManicEmu/ManicEmu.xcodeproj
+
       - name: Build unsigned app
         run: |
+          set -o pipefail
           xcodebuild \
             -project ManicEmu/ManicEmu.xcodeproj \
             -scheme ManicEmuSideload \
@@ -40,6 +40,8 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY='' \
@@ -47,11 +49,23 @@ jobs:
 
       - name: Package IPA
         run: |
-          APP_PATH="build/Build/Products/Release-iphoneos/ManicEmu.app"
-          test -d "$APP_PATH"
+          set -e
+          APP_PATH=$(find build/Build/Products \
+            -type d \
+            -name 'ManicEmu.app' \
+            -path '*iphoneos*' \
+            -print -quit)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: ManicEmu.app introuvable"
+            find build/Build/Products -maxdepth 3 -type d
+            exit 1
+          fi
+
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
           /usr/bin/zip -r ManicEMU-unsigned.ipa Payload
+          test -f ManicEMU-unsigned.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
@@ -59,3 +73,4 @@ jobs:
           name: ManicEMU-unsigned-IPA
           path: ManicEMU-unsigned.ipa
           if-no-files-found: error
+          retention-days: 7
