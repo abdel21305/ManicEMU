@@ -26,6 +26,11 @@ jobs:
       - name: List project schemes
         run: xcodebuild -list -project ManicEmu/ManicEmu.xcodeproj
 
+      - name: Show Xcode plugin diagnostics
+        run: |
+          xcodebuild -version
+          xcodebuild -list -project ManicEmu/ManicEmu.xcodeproj
+          env | sort | grep -E 'XCODE|SWIFT|SDK' || true
       - name: Build unsigned app
         run: |
           xcodebuild \
