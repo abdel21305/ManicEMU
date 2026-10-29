@@ -4,16 +4,21 @@ name: Build ManicEMU IPA
 on:
   workflow_dispatch:
   push:
-    paths:
-      - 'ManicEmu/**'
-      - '.github/workflows/main.yml'
+    branches:
+      - main
 
 permissions:
   contents: read
 
+concurrency:
+  group: build-manicemu-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
+    name: Build unsigned iOS IPA
     runs-on: macos-26
+    timeout-minutes: 90
 
     steps:
       - name: Checkout repository
@@ -23,54 +28,87 @@ jobs:
           lfs: true
 
       - name: Select Xcode
-        run: xcodebuild -version
-
-      - name: List project schemes
         run: |
-          xcodebuild -list \
-            -project ManicEmu/ManicEmu.xcodeproj
+          set -euo pipefail
+          xcodebuild -version
+          xcode-select -p
+
+      - name: Install Git LFS
+        run: |
+          set -euo pipefail
+          git lfs install
+          git lfs pull
+
+      - name: Verify project
+        run: |
+          set -euo pipefail
+          test -d "ManicEmu/ManicEmu.xcodeproj"
+          xcodebuild \
+            -list \
+            -project "ManicEmu/ManicEmu.xcodeproj"
+
+      - name: Resolve Swift packages
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project "ManicEmu/ManicEmu.xcodeproj" \
+            -scheme "ManicEmuSideload"
 
       - name: Build unsigned app
         run: |
           set -o pipefail
           xcodebuild \
-            -project ManicEmu/ManicEmu.xcodeproj \
-            -scheme ManicEmuSideload \
-            -configuration Release \
+            -project "ManicEmu/ManicEmu.xcodeproj" \
+            -scheme "ManicEmuSideload" \
+            -configuration "SideloadRelease" \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            -derivedDataPath build \
+            -derivedDataPath "$GITHUB_WORKSPACE/build" \
             -skipPackagePluginValidation \
             -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY='' \
-            build
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
 
-      - name: Package IPA
+      - name: Package unsigned IPA
         run: |
-          set -e
-          APP_PATH=$(find build/Build/Products \
-            -type d \
-            -name 'ManicEmu.app' \
-            -path '*iphoneos*' \
-            -print -quit)
+          set -euo pipefail
 
-          if [ -z "$APP_PATH" ]; then
-            echo "ERROR: ManicEmu.app introuvable"
-            find build/Build/Products -maxdepth 3 -type d
+          APP_PATH="$GITHUB_WORKSPACE/build/Build/Products/SideloadRelease-iphoneos/ManicEmu.app"
+
+          if [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: ManicEmu.app introuvable."
+            find "$GITHUB_WORKSPACE/build/Build/Products" \
+              -maxdepth 4 -name "*.app" -print
             exit 1
           fi
 
-          mkdir -p Payload
-          cp -R "$APP_PATH" Payload/
-          /usr/bin/zip -r ManicEMU-unsigned.ipa Payload
-          test -f ManicEMU-unsigned.ipa
+          mkdir -p "$GITHUB_WORKSPACE/ipa/Payload"
+          cp -R "$APP_PATH" "$GITHUB_WORKSPACE/ipa/Payload/"
+
+          cd "$GITHUB_WORKSPACE/ipa"
+          /usr/bin/zip -qry \
+            "$GITHUB_WORKSPACE/ManicEmu-unsigned.ipa" \
+            Payload
+
+          test -s "$GITHUB_WORKSPACE/ManicEmu-unsigned.ipa"
 
       - name: Upload IPA
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ManicEMU-unsigned-IPA
-          path: ManicEMU-unsigned.ipa
+          name: ManicEmu-unsigned-IPA
+          path: ManicEmu-unsigned.ipa
           if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ManicEmu-build-log
+          path: build.log
+          if-no-files-found: ignore
           retention-days: 7
